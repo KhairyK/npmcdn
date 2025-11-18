@@ -1,12 +1,6 @@
-name = "oauth"
-main = "/worker.js"
-compatibility_date = "2024-11-20"
+name = "npmcdn"
+type = "javascript"
 
 kv_namespaces = [
-  { binding = "SESSIONS", id = "xxxx", preview_id = "yyyy" }
+  { binding = "NPM_CACHE", id = "xxxxxxxxxxxxxxx" }
 ]
-
-[vars]
-GOOGLE_REDIRECT_URI = "https://kyrt.my.id/oauth/callback"
-JWT_SECRET = "random_32char_key"
-COOKIE_SECRET = "random_cookie_key"
