@@ -1,58 +1,47 @@
-import { ungzip, strFromU8 } from './node_modules/fflate/esm/browser.js';
-import Tar from './node_modules/tar-js/tar.js';
-
 export default {
-  async fetch(request, env) {
+  async fetch(request) {
     const url = new URL(request.url);
-    let path = url.pathname.slice(1);
-    const lastSlash = path.lastIndexOf('/');
-    const file = path.slice(lastSlash + 1);
-    const pkgAndVersion = path.slice(0, lastSlash);
 
-    const atVersion = pkgAndVersion.lastIndexOf('@');
-    let pkg, version;
-    if (pkgAndVersion.startsWith('@')) {
-      pkg = pkgAndVersion.slice(0, atVersion);
-      version = pkgAndVersion.slice(atVersion + 1);
-    } else {
-      pkg = pkgAndVersion.slice(0, atVersion);
-      version = pkgAndVersion.slice(atVersion + 1);
+    // Format: /npm/<package>@<version>/<file>
+    // Contoh: /npm/vue@3.3.4/dist/vue.esm-browser.js
+    if (!url.pathname.startsWith("/npm/")) {
+      return new Response("Invalid route. Use /npm/<package>@<version>/<file>", { status: 400 });
     }
 
-    const cacheKey = `${pkg}@${version}`;
+    // Hilangkan `/npm/`
+    const path = url.pathname.replace("/npm/", "");
 
-    try {
-      // 1. Cek cache di KV
-      let tarballArrayBuffer = await env.NPM_CACHE.get(cacheKey, { type: "arrayBuffer" });
+    // Sumber CDN fallback
+    const cdnList = [
+      `https://cdn.jsdelivr.net/npm/${path}`,
+      `https://unpkg.com/${path}`,
+    ];
 
-      if (!tarballArrayBuffer) {
-        // 2. Fetch tarball npm
-        const metaRes = await fetch(`https://registry.npmjs.org/${pkg}/${version}`);
-        if (!metaRes.ok) return new Response('Package not found', { status: 404 });
-        const meta = await metaRes.json();
-        const tarballUrl = meta.dist.tarball;
+    // Loop coba fetch ke semua CDN
+    for (const cdnURL of cdnList) {
+      try {
+        const response = await fetch(cdnURL);
 
-        const tarballRes = await fetch(tarballUrl);
-        tarballArrayBuffer = await tarballRes.arrayBuffer();
+        if (response.ok) {
+          // Clone response supaya header bisa di-edit
+          const newHeaders = new Headers(response.headers);
+          newHeaders.set("Access-Control-Allow-Origin", "*");
+          newHeaders.set("Cache-Control", "public, max-age=3600");
 
-        // 3. Simpan di KV
-        await env.NPM_CACHE.put(cacheKey, tarballArrayBuffer);
-      }
-
-      // 4. Extract file dari tarball
-      const files = await untar(tarballArrayBuffer);
-      const targetFile = files.find(f => f.name.endsWith(file));
-      if (!targetFile) return new Response('File not found', { status: 404 });
-
-      return new Response(targetFile.buffer, {
-        headers: {
-          'Content-Type': 'application/javascript',
-          'Cache-Control': 'public, max-age=31536000'
+          return new Response(response.body, {
+            status: response.status,
+            headers: newHeaders
+          });
         }
-      });
-
-    } catch (e) {
-      return new Response(e.toString(), { status: 500 });
+      } catch (err) {
+        // CDN error → lanjut ke yang berikutnya
+      }
     }
+
+    // Semua sumber CDN gagal
+    return new Response("Package or file not found in jsDelivr or UNPKG", {
+      status: 404,
+      headers: { "Access-Control-Allow-Origin": "*" },
+    });
   }
 };
